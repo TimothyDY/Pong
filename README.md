@@ -5,11 +5,12 @@ A real-time multiplayer Pong game built with Flask, Socket.IO, and SQLAlchemy. P
 ## Features
 
 - 🎮 **Real-time Multiplayer**: Play Pong with friends using WebSocket connections
-- 🤖 **Bot Mode**: Practice against an AI opponent
+- 🤖 **Bot Mode**: Practice against an AI opponent (creator-only access)
 - 🔒 **Private Rooms**: Create password-protected rooms for friends
 - 📱 **Responsive Design**: Works on desktop and mobile devices
 - 🎯 **Customizable**: Set custom win points and game modes
 - 🏆 **Score Tracking**: Keep track of wins and losses
+- 🌐 **WebSocket Support**: True real-time gameplay with low latency
 
 ## Local Development
 
@@ -22,8 +23,8 @@ A real-time multiplayer Pong game built with Flask, Socket.IO, and SQLAlchemy. P
 
 1. Clone the repository:
 ```bash
-git clone <your-repo-url>
-cd SocketGame
+git clone https://github.com/TimothyDY/Pong.git
+cd Pong
 ```
 
 2. Create a virtual environment:
@@ -44,61 +45,34 @@ python run.py
 
 5. Open your browser and navigate to `http://localhost:5000`
 
-## Vercel Deployment
-
-### Prerequisites
-
-- Vercel account
-- Git repository
-
-### Deployment Steps
-
-1. **Push your code to GitHub/GitLab/Bitbucket**
-
-2. **Connect to Vercel**:
-   - Go to [vercel.com](https://vercel.com)
-   - Click "New Project"
-   - Import your Git repository
-
-3. **Configure Environment Variables** (optional):
-   - `SECRET_KEY`: Custom secret key for Flask
-   - `DATABASE_URL`: Database connection string (if using external database)
-
-4. **Deploy**:
-   - Vercel will automatically detect the Python configuration
-   - Click "Deploy"
-
-### Vercel Configuration
-
-The project includes:
-- `vercel.json`: Vercel deployment configuration
-- `wsgi.py`: WSGI entry point for Vercel
-- `requirements.txt`: Python dependencies
-- `runtime.txt`: Python version specification
-
 ## Game Controls
 
 - **Mouse**: Move paddle up and down
 - **Touch**: Swipe on mobile devices
-- **Keyboard**: Arrow keys (if enabled)
 
 ## Game Modes
 
-- **PvP**: Two human players
-- **Bot**: Play against computer AI
+- **PvP**: Two human players (anyone can join)
+- **Bot**: Play against computer AI (only room creator can join)
 
 ## Room Types
 
-- **Public**: Anyone can join
+- **Public**: Anyone can join (with mode restrictions)
 - **Private**: Password-protected rooms
+
+## Room Access Rules
+
+- **Bot Rooms**: Only the creator can join (prevents others from interfering)
+- **PvP Rooms**: Up to 2 players can join
+- **Private Rooms**: Require password authentication
 
 ## Technical Details
 
 - **Backend**: Flask + Flask-SocketIO
-- **Database**: SQLAlchemy with SQLite (local) / PostgreSQL (production)
+- **Database**: SQLAlchemy with SQLite (local development)
 - **Frontend**: HTML5 Canvas + JavaScript
-- **Real-time**: WebSocket connections via Socket.IO
-- **Deployment**: Vercel serverless functions
+- **Real-time**: WebSocket connections via Socket.IO with eventlet
+- **Async Mode**: eventlet for optimal WebSocket performance
 
 ## Database
 
@@ -114,6 +88,16 @@ The application automatically creates and migrates the database schema. For prod
 |----------|-------------|---------|
 | `SECRET_KEY` | Flask secret key | `'secret!'` |
 | `DATABASE_URL` | Database connection string | `sqlite:///pong.db` |
+
+## Production Deployment
+
+For production deployment, consider these platforms that support WebSockets:
+
+- **Heroku**: Good for small to medium applications
+- **DigitalOcean App Platform**: Scalable with good WebSocket support
+- **AWS Elastic Beanstalk**: Enterprise-grade hosting
+- **Google Cloud Run**: Serverless with WebSocket support
+- **Railway**: Simple deployment with good WebSocket support
 
 ## Contributing
 
