@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Register</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <style>
+      .links { display:flex; gap:10px; justify-content:space-between; align-items:center; margin-top:10px; }
+      .links a { color: var(--accent); text-decoration:none; }
+      .flash-message { padding:12px; border-radius:8px; margin-bottom:16px; }
+      .flash-message.error { background:#7f1d1d; color:#fca5a5; border:1px solid #dc2626; }
+      .flash-message.success { background:#065f46; color:#6ee7b7; border:1px solid #059669; }
+      .flash-message.info { background:#1e40af; color:#93c5fd; border:1px solid #2563eb; }
+    </style>
+</head>
+<body>
+  <div class="page">
+    <div class="nav">
+      <a class="brand" href="/">
+        <div class="logo"></div>
+        <span>Pong Online</span>
+      </a>
+      <div class="right">
+        <a class="btn secondary" href="{{ url_for('landing') }}">Home</a>
+      </div>
+    </div>
+
+    <div class="container">
+      <h2 style="margin:0 0 8px">Create your account</h2>
+      <p class="muted" style="margin:0 0 16px">It's quick and free.</p>
+      
+      <!-- Flash Messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash-message {{ category }}" id="flash-{{ loop.index }}">
+              {{ message }}
+              <button onclick="this.parentElement.remove()" style="float:right; background:none; border:none; color:inherit; cursor:pointer;">×</button>
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+      
+      <form method="POST">
+        <input type="text" name="username" placeholder="Choose a username" required>
+        <input type="password" name="password" placeholder="Create a password" required>
+        <button type="submit">Register</button>
+      </form>
+      <div class="links">
+        <span class="muted">Already have an account?</span>
+        <a class="btn secondary" style="padding:10px 14px" href="{{ url_for('login') }}">Login</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Auto-hide flash messages after 5 seconds
+    setTimeout(() => {
+      document.querySelectorAll('.flash-message').forEach(msg => {
+        msg.style.opacity = '0';
+        msg.style.transition = 'opacity 0.3s ease';
+        setTimeout(() => msg.remove(), 300);
+      });
+    }, 5000);
+  </script>
+</body>
+</html>

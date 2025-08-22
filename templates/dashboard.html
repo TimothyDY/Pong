@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+      .layout { display:grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1100px; margin: 0 auto; }
+      .card { background: var(--card); padding:18px; border-radius:14px; border:1px solid var(--border); box-shadow: 0 10px 30px rgba(0,0,0,.25); text-align:left; }
+      .rooms-list { list-style:none; padding:0; margin:0; }
+      .rooms-list li { display:flex; justify-content:space-between; align-items:center; padding:12px; border:1px solid var(--border); border-radius:12px; margin-bottom:10px; background: var(--card); }
+      .btn { padding:10px 12px; border-radius:10px; }
+      .btn.secondary { background: var(--bg); border: 2px solid var(--border); color: var(--text); }
+      .field { width:100%; padding:12px; border:1px solid var(--border); border-radius:10px; background: var(--bg); color:var(--text); }
+      .row { display:flex; gap:10px; }
+      .room-meta { display:flex; gap:8px; margin-top:4px; }
+      .tag { padding:4px 8px; border-radius:6px; font-size:12px; font-weight:500; border:1px solid var(--border); background: var(--bg); color: var(--muted); }
+      .tag.green, .tag.purple, .tag.blue, .tag.orange { background: var(--bg); color: var(--text); border-color: var(--border); }
+      .room-info { flex:1; }
+      .room-actions { display:flex; gap:8px; align-items:center; }
+      .flash-message { padding:12px; border-radius:8px; margin-bottom:16px; }
+      .flash-message.error { background: var(--bg); color: var(--text); border: 1px solid var(--text); }
+      .flash-message.success { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+      .flash-message.info { background: var(--card); color: var(--text); border: 1px solid var(--border); }
+    </style>
+</head>
+<body>
+<div class="nav">
+  <a class="brand" href="/">
+    <div class="logo"></div>
+    <span>Pong Online</span>
+  </a>
+  <div class="right">
+    <span class="chip">Hi, {{ session['username'] }}</span>
+    <a class="btn secondary" href="{{ url_for('logout') }}">Logout</a>
+  </div>
+</div>
+
+<div class="layout">
+  <div class="card">
+    <h3>Create Room</h3>
+    <form method="POST">
+      <input class="field" type="text" name="room_name" placeholder="Room Name" required>
+      <div class="row">
+        <select class="field" name="room_type" id="room_type">
+          <option value="public">Public</option>
+          <option value="private">Private</option>
+        </select>
+        <select class="field" name="room_mode" id="room_mode">
+          <option value="pvp">vs Player</option>
+          <option value="bot">vs Computer</option>
+        </select>
+      </div>
+      <div class="row">
+        <input class="field" type="number" name="win_points" id="win_points" placeholder="Win Points" value="" min="1" max="20" required style="-moz-appearance: textfield; -webkit-appearance: textfield; appearance: textfield;">
+      </div>
+      <input class="field" type="password" name="password" id="password_field" placeholder="Password (for private)" style="display:none;">
+      <button class="btn" type="submit">Create Room</button>
+    </form>
+    <p class="muted" style="margin:8px 0 0">Choose PvP for 2 players or vs Computer for solo play!</p>
+  </div>
+
+  <div class="card">
+    <h3>Available Rooms</h3>
+    <ul class="rooms-list" id="roomsList">
+      {% for r in rooms %}
+      <li data-room-id="{{ r['id'] }}">
+        <div class="room-info">
+          <div><strong>{{ r['name'] }}</strong></div>
+          <div class="room-meta">
+            <span class="tag {{ 'green' if r['type']=='public' else 'purple' }}">{{ r['type'] | capitalize }}</span>
+            <span class="tag blue">{{ r['mode'].upper() }}</span>
+            <span class="tag orange">Players: {{ r['players'] }}</span>
+            <span class="tag">First to {{ r.get('win_points', 5) }}</span>
+            <span class="tag">By: {{ r['created_by'] }}</span>
+          </div>
+        </div>
+        <div class="room-actions">
+          {% if r['type'] == 'public' %}
+            <a class="btn" href="{{ url_for('game', room_id=r['id']) }}">Join</a>
+            {% if r['created_by'] == session['username'] %}
+              <a class="btn" href="{{ url_for('game', room_id=r['id']) }}?autostart=1">Start</a>
+              <button class="btn secondary btn-room-delete" data-room-id="{{ r['id'] }}">Delete</button>
+            {% endif %}
+          {% else %}
+            {% if r['created_by'] == session['username'] %}
+              <!-- Room creator can join directly -->
+              <a class="btn" href="{{ url_for('game', room_id=r['id']) }}">Join (Your Room)</a>
+              <a class="btn" href="{{ url_for('game', room_id=r['id']) }}?autostart=1">Start</a>
+              <button class="btn secondary btn-room-delete" data-room-id="{{ r['id'] }}">Delete</button>
+            {% else %}
+              <!-- Other users need password -->
+              <form action="{{ url_for('game', room_id=r['id']) }}" method="GET" class="row" style="align-items:center;">
+                <input class="field" style="max-width:160px;" type="password" name="password" placeholder="Room Password" required>
+                <button class="btn" type="submit">Join</button>
+              </form>
+            {% endif %}
+          {% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    <div id="noRooms" style="display:none; text-align:center; padding:20px; color:var(--muted);">
+      No rooms available. Create one to get started!
+    </div>
+  </div>
+</div>
+
+<!-- Flash Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+    {% for category, message in messages %}
+      <div class="flash-message {{ category }}" id="flash-{{ loop.index }}" style="font-weight:600; border-width:2px;">
+        {{ message }}
+        <button onclick="this.parentElement.remove()" style="float:right; background:none; border:none; color:inherit; cursor:pointer;">×</button>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endwith %}
+
+<script>
+const socket = io();
+const roomsList = document.getElementById('roomsList');
+const noRooms = document.getElementById('noRooms');
+
+// Auto-hide flash messages after 5 seconds
+setTimeout(() => {
+  document.querySelectorAll('.flash-message').forEach(msg => {
+    msg.style.opacity = '0';
+    setTimeout(() => msg.remove(), 300);
+  });
+}, 5000);
+
+// Update room list in realtime
+function updateRoomList() {
+  const rooms = Array.from(roomsList.children);
+  if (rooms.length === 0) {
+    noRooms.style.display = 'block';
+  } else {
+    noRooms.style.display = 'none';
+  }
+}
+
+// Handle new room created
+socket.on('room_created', (data) => {
+  const room = data.room;
+  const currentUsername = '{{ session.get("username", "") }}';
+  const isCreator = room.created_by === currentUsername;
+  
+  const li = document.createElement('li');
+  li.setAttribute('data-room-id', room.id);
+  li.innerHTML = `
+    <div class="room-info">
+      <div><strong>${room.name}</strong></div>
+      <div class="room-meta">
+        <span class="tag ${room.type === 'public' ? 'green' : 'purple'}">${room.type.charAt(0).toUpperCase() + room.type.slice(1)}</span>
+        <span class="tag blue">${room.mode.toUpperCase()}</span>
+        <span class="tag orange">Players: ${room.players}</span>
+        <span class="tag">First to ${room.win_points || 5}</span>
+        <span class="tag">By: ${room.created_by}</span>
+      </div>
+    </div>
+    <div class="room-actions">
+      ${room.type === 'public' 
+        ? `<a class="btn" href="/game/${room.id}">Join</a>`
+        : isCreator
+          ? `<a class="btn" href="/game/${room.id}">Join (Your Room)</a>`
+          : `<form action="/game/${room.id}" method="GET" class="row" style="align-items:center;">
+              <input class="field" style="max-width:160px;" type="password" name="password" placeholder="Room Password" required>
+              <button class="btn" type="submit">Join</button>
+             </form>`
+      }
+    </div>
+  `;
+  
+  // Add with animation
+  li.style.opacity = '0';
+  li.style.transform = 'translateY(-20px)';
+  roomsList.insertBefore(li, roomsList.firstChild);
+  
+  setTimeout(() => {
+    li.style.transition = 'all 0.3s ease';
+    li.style.opacity = '1';
+    li.style.transform = 'translateY(0)';
+  }, 10);
+  
+  updateRoomList();
+});
+
+// Handle room updated (player count)
+socket.on('room_updated', (data) => {
+  const roomElement = document.querySelector(`[data-room-id="${data.room_id}"]`);
+  if (roomElement) {
+    const playerCountElement = roomElement.querySelector('.tag.orange');
+    if (playerCountElement) {
+      playerCountElement.textContent = `Players: ${data.players}`;
+    }
+  }
+});
+
+// Handle room dissolved
+socket.on('room_dissolved', (data) => {
+  const roomElement = document.querySelector(`[data-room-id="${data.room_id}"]`);
+  if (roomElement) {
+    roomElement.style.transition = 'all 0.3s ease';
+    roomElement.style.opacity = '0';
+    roomElement.style.transform = 'translateX(100px)';
+    setTimeout(() => {
+      roomElement.remove();
+      updateRoomList();
+    }, 300);
+  }
+});
+
+// (Removed verbose user connection logs)
+
+// Initialize room list state
+updateRoomList();
+
+document.getElementById("room_type").addEventListener("change", function(){
+    let passField = document.getElementById("password_field");
+    passField.style.display = (this.value === "private") ? "block" : "none";
+});
+
+// Delete room handler (creator only)
+roomsList.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-room-delete');
+  if (!btn) return;
+  const roomId = btn.getAttribute('data-room-id');
+  if (!roomId) return;
+  if (!confirm('Delete this room?')) return;
+  socket.emit('dissolve_room', { room_id: roomId });
+});
+</script>
+</body>
+</html>

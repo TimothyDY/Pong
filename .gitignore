@@ -1,0 +1,31 @@
+# Virtual environment
+env/
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+*.env
+
+# VSCode settings
+.vscode/
+
+# MacOS / Windows junk files
+.DS_Store
+Thumbs.db
+
+# Database files (for local development)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Vercel
+.vercel

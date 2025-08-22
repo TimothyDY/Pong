@@ -1,0 +1,37 @@
+{
+  "name": "pong-online-multiplayer",
+  "version": "1.0.0",
+  "description": "A real-time multiplayer Pong game built with Flask, Socket.IO, and SQLAlchemy. Play with friends online or challenge the computer in this modern web-based game.",
+  "main": "run.py",
+  "scripts": {
+    "start": "python run.py",
+    "dev": "python run.py",
+    "build": "python vercel_build.py",
+    "deploy": "vercel --prod",
+    "deploy:dev": "vercel",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "pong",
+    "multiplayer",
+    "game",
+    "flask",
+    "socket.io",
+    "real-time",
+    "websocket",
+    "python"
+  ],
+  "author": "Your Name",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "vercel": "^latest"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "python": "3.9"
+  }
+}
