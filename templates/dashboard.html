@@ -199,12 +199,24 @@ socket.on('room_created', (data) => {
 
 // Handle room updated (player count)
 socket.on('room_updated', (data) => {
+  console.log('Room updated:', data);
   const roomElement = document.querySelector(`[data-room-id="${data.room_id}"]`);
   if (roomElement) {
     const playerCountElement = roomElement.querySelector('.tag.orange');
     if (playerCountElement) {
       playerCountElement.textContent = `Players: ${data.players}`;
     }
+  }
+});
+
+// Handle game started
+socket.on('game_started', (data) => {
+  console.log('Game started:', data);
+  const roomElement = document.querySelector(`[data-room-id="${data.room_id}"]`);
+  if (roomElement) {
+    // Add a visual indicator that game is in progress
+    roomElement.style.borderColor = 'var(--text)';
+    roomElement.style.boxShadow = '0 0 10px rgba(0,255,136,.3)';
   }
 });
 

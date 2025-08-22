@@ -5,11 +5,10 @@ A real-time multiplayer Pong game built with Flask, Socket.IO, and SQLAlchemy. P
 ## Features
 
 - 🎮 **Real-time Multiplayer**: Play Pong with friends using WebSocket connections
-- 🤖 **Bot Mode**: Practice against an AI opponent (creator-only access)
+- 🤖 **Bot Mode**: Creator-only solo play vs Computer (bot is left, player is right)
 - 🔒 **Private Rooms**: Create password-protected rooms for friends
 - 📱 **Responsive Design**: Works on desktop and mobile devices
 - 🎯 **Customizable**: Set custom win points and game modes
-- 🏆 **Score Tracking**: Keep track of wins and losses
 - 🌐 **WebSocket Support**: True real-time gameplay with low latency
 
 ## Local Development
@@ -40,6 +39,10 @@ pip install -r requirements.txt
 
 4. Run the application:
 ```bash
+# Option 1: Use the startup script (recommended)
+python start.py
+
+# Option 2: Run directly
 python run.py
 ```
 
@@ -47,57 +50,90 @@ python run.py
 
 ## Game Controls
 
-- **Mouse**: Move paddle up and down
-- **Touch**: Swipe on mobile devices
+- Mouse: Move paddle up and down
 
 ## Game Modes
 
-- **PvP**: Two human players (anyone can join)
-- **Bot**: Play against computer AI (only room creator can join)
+- PvP: Two human players (public/private as configured)
+- Bot: Solo vs Computer
+  - Bot is always the left paddle
+  - Human player is always the right paddle
+  - Only the room creator can enter a bot room
+  - Dissolve Room is hidden in bot mode (use Leave Room)
 
 ## Room Types
 
-- **Public**: Anyone can join (with mode restrictions)
-- **Private**: Password-protected rooms
+- Public: Anyone can join (with mode restrictions)
+- Private: Password-protected rooms
 
 ## Room Access Rules
 
-- **Bot Rooms**: Only the creator can join (prevents others from interfering)
-- **PvP Rooms**: Up to 2 players can join
-- **Private Rooms**: Require password authentication
+- Bot Rooms: Only the creator can join; others are blocked
+- PvP Rooms: Up to 2 players can join
+- Private Rooms: Require password authentication
+
+## Gameplay Flow
+
+- Start: Only the room creator (PvP) or the human player (Bot) can start
+- Game Over:
+  - PvP: Overlay shows Leave Room and Refresh (no rematch flow)
+  - Bot: Overlay shows Restart (for the creator), Leave Room, and Refresh
 
 ## Technical Details
 
-- **Backend**: Flask + Flask-SocketIO
-- **Database**: SQLAlchemy with SQLite (local development)
-- **Frontend**: HTML5 Canvas + JavaScript
-- **Real-time**: WebSocket connections via Socket.IO with eventlet
-- **Async Mode**: eventlet for optimal WebSocket performance
+- Backend: Flask + Flask-SocketIO
+- Database: SQLAlchemy with SQLite (local development)
+- Frontend: HTML5 Canvas + JavaScript
+- Real-time: WebSocket connections via Socket.IO with eventlet
+- Async Mode: eventlet for optimal WebSocket performance
+
+## Troubleshooting Multiplayer Issues
+
+If you're experiencing multiplayer connection problems:
+
+1. Check WebSocket Connection: Look for the connection status indicator
+2. Browser Console: Open dev tools (F12) and check errors
+3. Test Connection:
+   ```bash
+   python test_websocket.py
+   ```
+4. Multiple Browsers: Try incognito or different browsers
+5. Firewall: Ensure port 5000 is open
+6. Eventlet: Use `python start.py`
+
+## Testing Multiplayer
+
+1. Start the server: `python start.py`
+2. Open two browser tabs/windows
+3. Register/login with different accounts
+4. Create a PvP room in one tab
+5. Join the room from the other tab
+6. Both players should see each other and be able to start the game
 
 ## Database
 
 The application automatically creates and migrates the database schema. For production, consider using:
 
-- **PostgreSQL**: Better for concurrent users
-- **MySQL**: Alternative relational database
-- **SQLite**: Good for development and small deployments
+- PostgreSQL
+- MySQL
+- SQLite (development)
 
 ## Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `SECRET_KEY` | Flask secret key | `'secret!'` |
+| `SECRET_KEY` | Flask secret key | `"secret!"` |
 | `DATABASE_URL` | Database connection string | `sqlite:///pong.db` |
 
 ## Production Deployment
 
-For production deployment, consider these platforms that support WebSockets:
+Platforms that support WebSockets:
 
-- **Heroku**: Good for small to medium applications
-- **DigitalOcean App Platform**: Scalable with good WebSocket support
-- **AWS Elastic Beanstalk**: Enterprise-grade hosting
-- **Google Cloud Run**: Serverless with WebSocket support
-- **Railway**: Simple deployment with good WebSocket support
+- Heroku
+- DigitalOcean App Platform
+- AWS Elastic Beanstalk
+- Google Cloud Run
+- Railway
 
 ## Contributing
 

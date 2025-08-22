@@ -37,9 +37,7 @@
       .btn.danger { background: var(--bg); color: var(--text); border: 2px solid var(--text); }
       .btn.success { background: var(--text); color: var(--bg); border: 2px solid var(--text); }
       .notice { margin-left: auto; color: var(--muted); }
-      .rematch-modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; }
-      .rematch-content { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--card); padding: 24px; border: 2px solid var(--border); text-align: center; min-width: 300px; box-shadow: 0 0 20px rgba(255,255,255,.2); }
-      .rematch-buttons { display: flex; gap: 12px; justify-content: center; margin-top: 16px; }
+
       .player-info { display: flex; gap: 16px; margin-bottom: 16px; justify-content: center; }
       .player-card { background: var(--card); padding: 12px; border: 2px solid var(--border); text-align: center; min-width: 120px; }
       .player-card.active { border-color: var(--text); color: var(--text); background: var(--card); box-shadow: 0 0 10px rgba(255,255,255,.3); }
@@ -102,28 +100,21 @@
           <div class="panel">
             <button class="btn" id="btnStart">Start Game</button>
             <button class="btn secondary" id="btnRestart" style="display: none;">Restart</button>
-            <button class="btn secondary" id="btnRematch" style="display: none;">Rematch</button>
+
             <button class="btn danger" id="btnDissolve" style="display: none;">Dissolve Room</button>
             <button class="btn secondary" id="btnLeave">Leave Room</button>
+            <button class="btn secondary" id="btnRefresh">Refresh</button>
           </div>
-          <span id="rematchInfo" class="notice"></span>
+
         </div>
       </div>
     </div>
   </div>
 </div>
 
-<!-- Rematch Modal -->
-<div class="rematch-modal" id="rematchModal">
-  <div class="rematch-content">
-    <h3>Rematch Request</h3>
-    <p id="rematchMessage">Room creator wants to play again!</p>
-    <div class="rematch-buttons">
-      <button class="btn success" id="btnAcceptRematch">Accept</button>
-      <button class="btn secondary" id="btnDeclineRematch">Decline</button>
-    </div>
-  </div>
-</div>
+ 
+
+
 
 <script>
 const socket = io();
@@ -146,16 +137,13 @@ let winPoints = 5;
 const statusEl = document.getElementById('status');
 const canvas = document.getElementById('pongCanvas');
 const ctx = canvas.getContext('2d');
-const rematchInfo = document.getElementById('rematchInfo');
+
 const playerInfo = document.getElementById('playerInfo');
 const playerLeftName = document.getElementById('playerLeftName');
 const playerRightName = document.getElementById('playerRightName');
 const btnStart = document.getElementById('btnStart');
-const btnRematch = document.getElementById('btnRematch');
 const btnRestart = document.getElementById('btnRestart');
 const btnDissolve = document.getElementById('btnDissolve');
-const rematchModal = document.getElementById('rematchModal');
-const rematchMessage = document.getElementById('rematchMessage');
 const scoreBoard = document.getElementById('scoreBoard');
 const leftScore = document.getElementById('leftScore');
 const rightScore = document.getElementById('rightScore');
@@ -236,14 +224,7 @@ function updateStatus(winner) {
 
 function updatePlayerCards() { /* player cards removed */ }
 
-function showRematchModal(requestedBy) {
-  rematchMessage.textContent = `${requestedBy} wants to play again!`;
-  rematchModal.style.display = 'block';
-}
 
-function hideRematchModal() {
-  rematchModal.style.display = 'none';
-}
 
 // Function to manage button overlay visibility
 function updateButtonOverlay() {
@@ -267,6 +248,7 @@ function updateButtonOverlay() {
     
     // Update individual button visibility
     if (btnStart) {
+      // Hide Start if a winner exists (post-game). Start will appear again after reset.
       const canStart = (!gameRunning && !(gameState && gameState.winner)) && (isRoomCreator || (mode === 'bot' && myPaddle === 'right'));
       btnStart.style.display = canStart ? 'inline-block' : 'none';
     }
@@ -275,16 +257,20 @@ function updateButtonOverlay() {
       btnRestart.style.display = (mode === 'bot' && isRoomCreator) ? 'inline-block' : 'none';
     }
     
-    if (btnRematch) {
-      btnRematch.style.display = (mode === 'pvp' && isRoomCreator && gameState && gameState.winner) ? 'inline-block' : 'none';
-    }
+
     
     if (btnDissolve) {
-      btnDissolve.style.display = isRoomCreator ? 'inline-block' : 'none';
+      btnDissolve.style.display = (mode === 'bot') ? 'none' : (isRoomCreator ? 'inline-block' : 'none');
     }
     
     if (btnLeave) {
-      btnLeave.style.display = 'inline-block'; // Always show leave button
+      // Always show leave button, especially after game over
+      btnLeave.style.display = 'inline-block';
+    }
+
+    const btnRefresh = document.getElementById('btnRefresh');
+    if (btnRefresh) {
+      btnRefresh.style.display = 'inline-block';
     }
   } else {
     // Hide overlay during active gameplay
@@ -392,6 +378,7 @@ function updateConnectionStatus(connected, text = '') {
 socket.on('connect', () => {
   updateConnectionStatus(true, 'Connected');
   console.log('Connected to server');
+  console.log('Socket ID:', socket.id);
 });
 
 socket.on('disconnect', () => {
@@ -405,7 +392,11 @@ socket.on('connect_error', (error) => {
 });
 
 // Socket event handlers
-socket.emit('join_room', { room_id: roomId });
+console.log('Attempting to join room:', roomId);
+socket.emit('join_room', { 
+    room_id: roomId,
+    username: username  // Send username as fallback
+});
 
 // Initialize button overlay on page load
 updateButtonOverlay();
@@ -418,16 +409,20 @@ socket.on('pong_init', (data) => {
   isRoomCreator = data.is_creator || false;
   roomCreator = data.room_creator || '';
   winPoints = data.win_points || 5;
+  // Track winner on client for overlay logic
+  if (data.winner) {
+    gameState.winner = data.winner;
+  } else {
+    delete gameState.winner;
+  }
   
   // Controls panels removed; update controls
   // Show appropriate button based on mode
-  if (btnRestart && btnRematch) {
+  if (btnRestart) {
     if (mode === 'bot') {
       btnRestart.style.display = isRoomCreator ? 'inline-block' : 'none';
-      btnRematch.style.display = 'none';
     } else {
       btnRestart.style.display = 'none';
-      btnRematch.style.display = isRoomCreator ? 'inline-block' : 'none';
     }
   }
   
@@ -438,11 +433,7 @@ socket.on('pong_init', (data) => {
   // Update button overlay visibility
   updateButtonOverlay();
   
-  if (data.winner) {
-    rematchInfo.textContent = 'Game finished.';
-  } else {
-    rematchInfo.textContent = '';
-  }
+
 });
 
 socket.on('players_update', (data) => {
@@ -519,6 +510,7 @@ socket.on('pong_paddle_update', (data) => {
 });
 
 socket.on('pong_game_started', (data) => {
+  console.log('Received pong_game_started:', data);
   gameRunning = true;
   gameState = data.game_state || gameState;
   drawGame();
@@ -532,6 +524,8 @@ socket.on('pong_game_started', (data) => {
 socket.on('pong_game_over', (data) => {
   gameRunning = false;
   gameState = data.game_state || gameState;
+  // Store winner for overlay logic
+  gameState.winner = data.winner;
   updateStatus(data.winner);
   
   // Flash the winner's side
@@ -551,35 +545,22 @@ socket.on('pong_game_over', (data) => {
   drawGame();
 });
 
-socket.on('rematch_requested', (data) => {
-  if (!isRoomCreator) {
-    showRematchModal(data.requested_by);
-    rematchInfo.textContent = 'Rematch requested. Please respond.';
-  }
-});
 
-socket.on('rematch_status', (d) => {
-  const votes = d.votes || [];
-  const pending = d.pending || [];
-  rematchInfo.textContent = `Rematch votes: ${votes.join(', ')} | Pending: ${pending.join(', ')}`;
-});
-
-socket.on('rematch_declined', (data) => {
-  rematchInfo.textContent = `${data.declined_by} declined rematch.`;
-  hideRematchModal();
-});
 
 socket.on('pong_reset', (data) => {
   gameState = data.game_state || gameState;
   gameRunning = false;
+  // Clear winner on reset so Start button can reappear
+  if (gameState && 'winner' in gameState) {
+    delete gameState.winner;
+  }
   drawGame();
   updateStatus(null);
   updatePlayerCards();
   const overlay = document.getElementById('gameOverlay');
   if (overlay) overlay.style.display = 'none';
   if (gameStatus) gameStatus.textContent = 'Game reset! Good luck!';
-  if (rematchInfo) rematchInfo.textContent = '';
-  hideRematchModal();
+
   // Update button overlay visibility
   updateButtonOverlay();
 });
@@ -592,21 +573,63 @@ socket.on('room_dissolved', () => {
 });
 
 socket.on('error', (e) => {
+  console.log('Received error:', e);
   showFlashMessage(e.message || 'Error occurred', 'error');
 });
+
+socket.on('join_success', (data) => {
+  console.log('Successfully joined room:', data);
+  showFlashMessage(data.message, 'success');
+});
+
+// Add connection status display
+function showConnectionStatus() {
+  const statusDiv = document.createElement('div');
+  statusDiv.id = 'connectionStatus';
+  statusDiv.style.cssText = `
+    position: fixed;
+    top: 20px;
+    left: 20px;
+    padding: 8px 12px;
+    background: var(--card);
+    border: 2px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    z-index: 1000;
+  `;
+  document.body.appendChild(statusDiv);
+  
+  // Update status based on socket connection
+  socket.on('connect', () => {
+    statusDiv.textContent = '🟢 Connected';
+    statusDiv.style.borderColor = 'var(--text)';
+  });
+  
+  socket.on('disconnect', () => {
+    statusDiv.textContent = '🔴 Disconnected';
+    statusDiv.style.borderColor = 'var(--muted)';
+  });
+  
+  socket.on('connect_error', () => {
+    statusDiv.textContent = '⚠️ Connection Error';
+    statusDiv.style.borderColor = 'var(--text)';
+  });
+}
+
+// Initialize connection status display
+showConnectionStatus();
 
 // Button event listeners
 document.addEventListener('DOMContentLoaded', () => {
   const btnStart = document.getElementById('btnStart');
   const btnRestart = document.getElementById('btnRestart');
-  const btnRematch = document.getElementById('btnRematch');
   const btnDissolve = document.getElementById('btnDissolve');
+  const btnRefresh = document.getElementById('btnRefresh');
   const btnLeave = document.getElementById('btnLeave');
-  const btnAcceptRematch = document.getElementById('btnAcceptRematch');
-  const btnDeclineRematch = document.getElementById('btnDeclineRematch');
   
   if (btnStart) {
     btnStart.addEventListener('click', () => {
+      console.log('Start button clicked, emitting pong_start_game');
       // Always ask server to start; server will enforce permissions
       socket.emit('pong_start_game', { room_id: roomId });
       if (gameStatus) gameStatus.textContent = 'Starting game...';
@@ -628,19 +651,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const overlay = document.getElementById('gameOverlay');
       if (overlay) overlay.style.display = 'none';
       if (gameStatus) gameStatus.textContent = 'Game restarted! Good luck!';
-      if (rematchInfo) rematchInfo.textContent = '';
+
       // Update button overlay visibility
       updateButtonOverlay();
     });
   }
   
-  if (btnRematch) {
-    btnRematch.addEventListener('click', () => {
-      // Rematch for PvP mode only
-      socket.emit('pong_rematch_request', { room_id: roomId });
-      if (rematchInfo) rematchInfo.textContent = 'Waiting for other player...';
-    });
-  }
+
   
   if (btnDissolve) {
     btnDissolve.addEventListener('click', () => {
@@ -650,6 +667,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   
+  // Refresh buttons
+  const doRefresh = () => { window.location.reload(); };
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', doRefresh);
+  }
+  
+  
   if (btnLeave) {
     btnLeave.addEventListener('click', () => {
       socket.emit('leave_room', { room_id: roomId });
@@ -657,38 +681,13 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
   
-  if (btnAcceptRematch) {
-    btnAcceptRematch.addEventListener('click', () => {
-      socket.emit('pong_rematch_response', { 
-        room_id: roomId, 
-        response: 'accept' 
-      });
-      hideRematchModal();
-      if (rematchInfo) rematchInfo.textContent = 'Rematch accepted!';
-    });
-  }
-  
-  if (btnDeclineRematch) {
-    btnDeclineRematch.addEventListener('click', () => {
-      socket.emit('pong_rematch_response', {
-        room_id: roomId,
-        response: 'decline'
-      });
-      hideRematchModal();
-      if (rematchInfo) rematchInfo.textContent = 'Rematch declined';
-    });
-  }
+
 });
 
 // Initial canvas draw
 drawGame();
 
-// Close modal when clicking outside
-rematchModal.addEventListener('click', (e) => {
-  if (e.target === rematchModal) {
-    hideRematchModal();
-  }
-});
+
 </script>
 </body>
 </html>

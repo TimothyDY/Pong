@@ -1,3 +1,7 @@
+# Add eventlet import at the top
+import eventlet
+eventlet.monkey_patch()
+
 from flask import Flask, render_template, request, redirect, session, url_for, flash, jsonify
 from flask_socketio import SocketIO, join_room, leave_room, emit
 from flask_sqlalchemy import SQLAlchemy
@@ -23,8 +27,15 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# Use eventlet for proper WebSocket support
-socketio = SocketIO(app, async_mode='eventlet', manage_session=False, cors_allowed_origins="*")
+# Use eventlet for proper WebSocket support with better session handling
+socketio = SocketIO(
+    app, 
+    async_mode='eventlet', 
+    manage_session=False, 
+    cors_allowed_origins="*",
+    logger=True,
+    engineio_logger=True
+)
 
 
 class User(db.Model):
@@ -225,7 +236,7 @@ def dashboard():
 
         # initialize in-memory state for Pong
         active_rooms[room_id] = {
-            'members': set(),
+            'members': {session["username"]},  # Creator is automatically a member
             'mode': mode,
             'win_points': win_points,
             'players': {'left': None, 'right': None},
@@ -236,9 +247,6 @@ def dashboard():
             },
             'game_running': False,
             'winner': None,
-            'rematch_votes': set(),
-            'rematch_requested': False,
-            'rematch_pending': set(),
             'room_creator': session["username"]
         }
         
@@ -249,7 +257,7 @@ def dashboard():
                 'name': room_name,
                 'type': room_type,
                 'mode': mode,
-                'players': 0,
+                'players': 1,  # Creator is already a member
                 'win_points': win_points,
                 'created_by': session["username"]
             }
@@ -362,9 +370,6 @@ def game(room_id):
             },
             'game_running': False,
             'winner': None,
-            'rematch_votes': set(),
-            'rematch_requested': False,
-            'rematch_pending': set(),
             'room_creator': creator_name
         }
     return render_template("game.html", room_id=room_id, username=session["username"])
@@ -372,11 +377,13 @@ def game(room_id):
 @socketio.on("disconnect")
 def handle_disconnect():
     username = session.get("username")
+    print(f"User disconnected: {username}")
     if username:
         # Remove user from all active rooms
         rooms_to_clean = []
         for room_id, state in active_rooms.items():
             if username in state['members']:
+                print(f"Removing {username} from room {room_id}")
                 state['members'].discard(username)
                 
                 # Clear paddle assignment
@@ -419,10 +426,20 @@ def handle_join(data):
     if not room_id:
         emit("error", {"message": "room_id required"})
         return
+    
+    # Get username from session or request data
     username = session.get("username")
     if not username:
-        emit("error", {"message": "Not authenticated"})
-        return
+        # Try to get from request data as fallback
+        username = data.get("username")
+        if not username:
+            emit("error", {"message": "Not authenticated"})
+            return
+
+    print(f"=== JOIN ROOM ATTEMPT ===")
+    print(f"Room ID: {room_id}")
+    print(f"Username: {username}")
+    print(f"Active rooms: {list(active_rooms.keys())}")
 
     room = Room.query.filter_by(id=room_id).first()
     if not room:
@@ -466,51 +483,106 @@ def handle_join(data):
             },
             'game_running': False,
             'winner': None,
-            'rematch_votes': set(),
-            'rematch_requested': False,
-            'rematch_pending': set(),
             'room_creator': creator_name
         }
         active_rooms[room_id] = state
+        print(f"Created new room state for {room_id}")
 
     # enforce player limit and room access rules
     current_players = state['members']
     
-    # Bot mode: only room creator can join
+    # Bot mode: lock room to creator and force assignments; allow creator to (re)join anytime
     if state.get('mode') == 'bot':
         if username != state['room_creator']:
             emit("error", {"message": "Only room creator can join vs Computer rooms"})
             return
-        max_humans = 1
+        # Force single-member room with correct paddle assignments
+        state['members'] = {username}
+        state['players']['left'] = 'Computer'
+        state['players']['right'] = username
+        your_paddle = 'right'
+        join_room(room_id)
+        socketio.emit('room_updated', { 'room_id': room_id, 'players': len(state['members']) })
+        emit('pong_init', {
+            'game_state': state['game_state'],
+            'game_running': state['game_running'],
+            'winner': state['winner'],
+            'you': your_paddle,
+            'players': state['players'],
+            'mode': state['mode'],
+            'win_points': state.get('win_points', 5),
+            'room_creator': state['room_creator'],
+            'is_creator': True
+        })
+        emit("players_update", {
+            "players": state['players'],
+            "members": list(state['members']),
+            "room_creator": state['room_creator']
+        }, room=room_id)
+        return
     else:
         # PvP mode: allow up to 2 players
         max_humans = 2
     
-    if len(current_players) >= max_humans and username not in current_players:
-        emit("error", {"message": f"Room full ({max_humans} player{'s' if max_humans>1 else ''} max)"})
-        return
-
-    join_room(room_id)
-    state['members'].add(username)
-    
-    # assign paddle positions (left/right)
-    your_paddle = None
-    if state['mode'] == 'bot':
-        # In bot mode: Computer is left, player is right
-        state['players']['left'] = 'Computer'
-        state['players']['right'] = username
-        your_paddle = 'right'
+    # If user is already in the room, just reconnect them
+    if username in current_players:
+        print(f"User {username} already in room {room_id}, reconnecting...")
+        # Don't add them again, just assign their paddle
+        your_paddle = 'left' if state['players'].get('left') == username else ('right' if state['players'].get('right') == username else None)
+        if not your_paddle:
+            # Reassign paddle respecting creator preference (creator -> right, guest -> left) in PvP
+            if state['mode'] == 'pvp':
+                preferred = 'right' if username == state['room_creator'] else 'left'
+                other = 'left' if preferred == 'right' else 'right'
+                if state['players'][preferred] is None:
+                    state['players'][preferred] = username
+                    your_paddle = preferred
+                elif state['players'][other] is None:
+                    state['players'][other] = username
+                    your_paddle = other
+            else:
+                # Bot mode: enforce Computer on left, human on right
+                state['players']['left'] = 'Computer'
+                state['players']['right'] = username
+                your_paddle = 'right'
     else:
-        # PvP mode: assign positions as players join
-        if state['players']['left'] is None:
-            state['players']['left'] = username
-            your_paddle = 'left'
-        elif state['players']['right'] is None:
+        # New user joining
+        if len(current_players) >= max_humans:
+            emit("error", {"message": f"Room full ({max_humans} player{'s' if max_humans>1 else ''} max)"})
+            return
+        
+        # Add new user to members
+        state['members'].add(username)
+        print(f"Added {username} to room {room_id}. Total members: {len(state['members'])}")
+        
+        # assign paddle positions (left/right) for new users
+        if state['mode'] == 'bot':
+            # In bot mode: Computer is left, player is right
+            state['players']['left'] = 'Computer'
             state['players']['right'] = username
             your_paddle = 'right'
         else:
-            # already assigned, find existing assignment
-            your_paddle = 'left' if state['players']['left'] == username else ('right' if state['players']['right'] == username else None)
+            # PvP mode: assign positions so creator is right, guest is left
+            preferred = 'right' if username == state['room_creator'] else 'left'
+            other = 'left' if preferred == 'right' else 'right'
+            if state['players'][preferred] is None:
+                state['players'][preferred] = username
+                your_paddle = preferred
+            elif state['players'][other] is None:
+                state['players'][other] = username
+                your_paddle = other
+            else:
+                # already assigned, find existing assignment
+                your_paddle = 'left' if state['players']['left'] == username else ('right' if state['players']['right'] == username else None)
+    
+    # Debug logging
+    print(f"Player {username} joined room {room_id}, mode: {state['mode']}, paddle: {your_paddle}")
+    print(f"Current players: {state['players']}")
+    print(f"Members: {state['members']}")
+    
+    # Join the Socket.IO room
+    join_room(room_id)
+    print(f"User {username} joined Socket.IO room {room_id}")
 
     # Emit realtime room update to dashboard
     socketio.emit('room_updated', {
@@ -531,12 +603,23 @@ def handle_join(data):
         'is_creator': username == state['room_creator']
     })
     
+    print(f"Sent pong_init to {username} with paddle: {your_paddle}")
+    
     # notify room about players update
     emit("players_update", {
         "players": state['players'],
         "members": list(state['members']),
         "room_creator": state['room_creator']
     }, room=room_id)
+    
+    print(f"Sent players_update to room {room_id}: {state['players']}")
+    
+    # Send confirmation to the joining user
+    emit("join_success", {
+        "message": f"Successfully joined room {room_id}",
+        "paddle": your_paddle,
+        "mode": state['mode']
+    })
 
 def _check_winner(score, win_points=5):
     """Check if someone won (first to win_points)"""
@@ -814,25 +897,46 @@ def on_pong_start_game(data):
     room_id = data.get('room_id')
     username = session.get('username')
     
-    if room_id not in active_rooms or not username:
+    print(f"=== GAME START ATTEMPT ===")
+    print(f"Room ID: {room_id}")
+    print(f"Username: {username}")
+    print(f"Active rooms: {list(active_rooms.keys())}")
+    
+    if room_id not in active_rooms:
+        print(f"ERROR: Room {room_id} not found in active_rooms")
+        emit('error', {'message': f'Room {room_id} not found'})
+        return
+        
+    if not username:
+        print(f"ERROR: No username in session")
+        emit('error', {'message': 'Not authenticated'})
         return
         
     state = active_rooms[room_id]
+    
+    # Debug logging
+    print(f"Game start attempt by {username} in room {room_id}")
+    print(f"Mode: {state['mode']}, Members: {state['members']}, Players: {state['players']}")
+    print(f"Room creator: {state['room_creator']}")
+    print(f"Game running: {state['game_running']}")
     
     # Permissions: Room creator can always start. In bot mode, allow the human player to start as well.
     if username != state['room_creator']:
         if state.get('mode') == 'bot' and state['players'].get('right') == username:
             pass
         else:
+            print(f"ERROR: {username} is not room creator {state['room_creator']}")
             emit('error', {'message': 'Only room creator can start game'})
             return
     
     # Check if we can start the game
     if state['mode'] == 'bot':
-        # Bot mode: allow start if right paddle is assigned to any human
+        # Bot mode: ensure assignments exist, then allow start
+        if not state['players'].get('left'):
+            state['players']['left'] = 'Computer'
         if not state['players'].get('right'):
-            emit('error', {'message': 'Assign right paddle before starting bot game'})
-            return
+            # Prefer the requesting user as the human player
+            state['players']['right'] = username
     else:
         # PvP mode: need 2 human players
         if len(state['members']) < 2:
@@ -852,6 +956,9 @@ def on_pong_start_game(data):
     state['game_running'] = True
     state['winner'] = None
     
+    print(f"Game started in room {room_id}!")
+    print(f"Final state check - Members: {state['members']}, Players: {state['players']}")
+    
     # Reset game state
     state['game_state'] = {
         'ball': {'x': 400, 'y': 300, 'dx': 4, 'dy': 2},  # Use consistent starting values
@@ -864,17 +971,26 @@ def on_pong_start_game(data):
     game_thread.daemon = True
     game_thread.start()
     
+    # Notify all players in the room that the game has started
     emit('pong_game_started', {
         'game_state': state['game_state']
     }, room=room_id)
+    
+    # Also emit to dashboard for real-time updates
+    socketio.emit('game_started', {
+        'room_id': room_id,
+        'status': 'Game in progress'
+    })
 
 # Game loop for each room
 def game_loop(room_id):
     """Main game loop for Pong with consistent timing and frame rate"""
     if room_id not in active_rooms:
+        print(f"Game loop: Room {room_id} not found in active_rooms")
         return
     
     room = active_rooms[room_id]
+    print(f"Starting game loop for room {room_id}, mode: {room['mode']}")
     
     try:
         last_time = time.time()
@@ -894,6 +1010,7 @@ def game_loop(room_id):
                 scoring_side = _update_ball_position(room['game_state'])
                 if scoring_side:
                     # On score, pause for 1 second and broadcast updated state
+                    print(f"Score! {scoring_side} side scored in room {room_id}")
                     socketio.emit('pong_score', {
                         'game_state': room['game_state'],
                         'scoring_side': scoring_side
@@ -913,6 +1030,7 @@ def game_loop(room_id):
                 # Check for winner using room's win_points
                 winner_side = _check_winner(room['game_state']['score'], room.get('win_points', 5))
                 if winner_side:
+                    print(f"Game over! {winner_side} side won in room {room_id}")
                     room['game_running'] = False
                     room['winner'] = winner_side
                     socketio.emit('pong_game_over', {
@@ -921,9 +1039,7 @@ def game_loop(room_id):
                         'score': room['game_state']['score'],
                         'win_points': room.get('win_points', 5)
                     }, room=room_id)
-                    room['rematch_votes'] = set()
-                    room['rematch_requested'] = False
-                    room['rematch_pending'] = set()
+
                     break
                 
                 accumulator -= fixed_dt
@@ -948,112 +1064,9 @@ def game_loop(room_id):
         # Clean up if room still exists
         if room_id in active_rooms:
             active_rooms[room_id]['game_running'] = False
+            print(f"Game loop ended for room {room_id}")
 
-@socketio.on('pong_rematch_request')
-def on_pong_rematch_request(data):
-    room_id = data.get('room_id')
-    username = session.get('username')
-    if not room_id or room_id not in active_rooms or not username:
-        return
-    
-    state = active_rooms[room_id]
-    
-    # Only room creator can request rematch
-    if username != state['room_creator']:
-        emit('error', {'message': 'Only room creator can request rematch'})
-        return
-    
-    # Only allow when game is over
-    if not state.get('winner'):
-        emit('error', {'message': 'Game still in progress'})
-        return
-    
-    # Bot mode: instant reset (no second player to vote)
-    if state.get('mode') == 'bot':
-        state['game_state'] = {
-            'ball': {'x': 400, 'y': 300, 'dx': 4, 'dy': 2},  # Use consistent starting values
-            'paddles': {'left': {'y': 250}, 'right': {'y': 250}},
-            'score': {'left': 0, 'right': 0}
-        }
-        state['winner'] = None
-        state['game_running'] = False
-        state['rematch_votes'].clear()
-        state['rematch_requested'] = False
-        state['rematch_pending'].clear()
-        emit('pong_reset', {
-            'game_state': state['game_state']
-        }, room=room_id)
-        return
 
-    # PvP: collect votes
-    state['rematch_requested'] = True
-    state['rematch_pending'] = set()
-    paddle = 'left' if state['players'].get('left') == username else ('right' if state['players'].get('right') == username else None)
-    if paddle:
-        state['rematch_votes'].add(paddle)
-    emit('rematch_requested', {
-        'requested_by': username,
-        'creator_vote': paddle
-    }, room=room_id)
-
-@socketio.on('pong_rematch_response')
-def on_pong_rematch_response(data):
-    room_id = data.get('room_id')
-    response = data.get('response')  # 'accept' or 'decline'
-    username = session.get('username')
-    
-    if not room_id or room_id not in active_rooms or not username:
-        return
-    
-    state = active_rooms[room_id]
-    
-    if not state.get('rematch_requested'):
-        emit('error', {'message': 'No rematch request'})
-        return
-    
-    if username == state['room_creator']:
-        emit('error', {'message': 'You are the room creator'})
-        return
-    
-    if response == 'accept':
-        # Add player's vote
-        paddle = 'left' if state['players'].get('left') == username else ('right' if state['players'].get('right') == username else None)
-        if paddle:
-            state['rematch_votes'].add(paddle)
-            state['rematch_pending'].add(username)
-        
-        # Check if both players voted
-        if len(state['rematch_votes']) >= 2:
-            # Reset game (use same helper as start)
-            state['game_state'] = {
-                'ball': {'x': 400, 'y': 300, 'dx': 4, 'dy': 2},  # Use consistent starting values
-                'paddles': {'left': {'y': 250}, 'right': {'y': 250}},
-                'score': {'left': 0, 'right': 0}
-            }
-            state['winner'] = None
-            state['game_running'] = False
-            state['rematch_votes'].clear()
-            state['rematch_requested'] = False
-            state['rematch_pending'].clear()
-            
-            emit('pong_reset', {
-                'game_state': state['game_state']
-            }, room=room_id)
-        else:
-            emit('rematch_status', {
-                'votes': list(state['rematch_votes']),
-                'pending': list(state['rematch_pending'])
-            }, room=room_id)
-    
-    elif response == 'decline':
-        # Reset rematch state
-        state['rematch_requested'] = False
-        state['rematch_votes'].clear()
-        state['rematch_pending'].clear()
-        
-        emit('rematch_declined', {
-            'declined_by': username
-        }, room=room_id)
 
 @socketio.on('dissolve_room')
 def on_dissolve_room(data):
@@ -1121,7 +1134,27 @@ def on_leave(data):
 if __name__ == "__main__":
     # For local development only
     # Vercel will use the app object directly
-    socketio.run(app, debug=True, port=5000, use_reloader=False, allow_unsafe_werkzeug=True)
+    print("🚀 Starting Pong Multiplayer Server...")
+    print("🌐 WebSocket server will be available at: http://localhost:5000")
+    print("📱 Open multiple browser tabs to test multiplayer!")
+    print("⚠️  Press Ctrl+C to stop the server")
+    print("-" * 50)
+    
+    try:
+        socketio.run(
+            app, 
+            debug=True, 
+            port=5000, 
+            use_reloader=False, 
+            allow_unsafe_werkzeug=True,
+            host='0.0.0.0'  # Allow external connections for testing
+        )
+    except KeyboardInterrupt:
+        print("\n🛑 Server stopped by user")
+    except Exception as e:
+        print(f"❌ Server error: {e}")
+        import traceback
+        traceback.print_exc()
 
 # For production deployment
 app.debug = False
