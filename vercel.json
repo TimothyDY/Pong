@@ -17,10 +17,5 @@
   ],
   "env": {
     "PYTHONPATH": "."
-  },
-  "functions": {
-    "run.py": {
-      "maxDuration": 30
-    }
   }
 }
