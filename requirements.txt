@@ -3,5 +3,6 @@ Flask-SocketIO==5.3.6
 Flask-SQLAlchemy==3.1.1
 python-socketio==5.8.0
 python-engineio==4.7.1
-eventlet==0.33.3
-gunicorn==21.2.0
+# Remove eventlet and gunicorn for Vercel compatibility
+# eventlet==0.33.3
+# gunicorn==21.2.0

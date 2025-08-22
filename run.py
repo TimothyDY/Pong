@@ -8,21 +8,28 @@ import threading
 import time
 import random
 import math
+import os
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
+
 # Use environment variable for database URL or fallback to SQLite
-import os
 database_url = os.environ.get('DATABASE_URL', 'sqlite:///pong.db')
 if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
+
+# For Vercel, use in-memory database if we can't write to filesystem
+if os.environ.get('VERCEL'):
+    database_url = 'sqlite:///:memory:'
+
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
-# Use threading async mode to avoid requiring eventlet/gevent in local/dev
-# For Vercel, we'll use threading mode which is more compatible
-socketio = SocketIO(app, async_mode='threading', manage_session=False, cors_allowed_origins="*")
+
+# For Vercel, use polling mode instead of threading
+# This is more compatible with serverless environments
+socketio = SocketIO(app, async_mode='polling', manage_session=False, cors_allowed_origins="*")
 
 
 class User(db.Model):
@@ -71,7 +78,6 @@ active_rooms = {}
 def init_database():
     """Initialize database with proper migration"""
     with app.app_context():
-        # For Vercel, use in-memory database if we can't write to filesystem
         try:
             # Create all tables
             db.create_all()
@@ -848,11 +854,12 @@ def on_pong_start_game(data):
         'score': {'left': 0, 'right': 0}
     }
     
-    # Start game loop in a separate thread
-    import threading
-    game_thread = threading.Thread(target=game_loop, args=(room_id,))
-    game_thread.daemon = True
-    game_thread.start()
+    # For Vercel compatibility, start game loop without threading
+    # The game will run in the main thread which is fine for serverless
+    try:
+        game_loop(room_id)
+    except Exception as e:
+        print(f"Game loop error: {e}")
     
     emit('pong_game_started', {
         'game_state': state['game_state']
@@ -1115,3 +1122,8 @@ if __name__ == "__main__":
 
 # For Vercel production deployment
 app.debug = False
+
+# Ensure app is properly configured for Vercel
+if os.environ.get('VERCEL'):
+    # Disable threading for Vercel compatibility
+    app.config['SOCKETIO_ASYNC_MODE'] = 'polling'
