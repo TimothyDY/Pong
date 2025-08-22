@@ -18,18 +18,13 @@ database_url = os.environ.get('DATABASE_URL', 'sqlite:///pong.db')
 if database_url.startswith('postgres://'):
     database_url = database_url.replace('postgres://', 'postgresql://', 1)
 
-# For Vercel, use in-memory database if we can't write to filesystem
-if os.environ.get('VERCEL'):
-    database_url = 'sqlite:///:memory:'
-
 app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
 
-# For Vercel, use polling mode instead of threading
-# This is more compatible with serverless environments
-socketio = SocketIO(app, async_mode='polling', manage_session=False, cors_allowed_origins="*")
+# Use eventlet for proper WebSocket support
+socketio = SocketIO(app, async_mode='eventlet', manage_session=False, cors_allowed_origins="*")
 
 
 class User(db.Model):
@@ -478,9 +473,19 @@ def handle_join(data):
         }
         active_rooms[room_id] = state
 
-    # enforce player limit (bot mode allows only 1 human)
+    # enforce player limit and room access rules
     current_players = state['members']
-    max_humans = 1 if state.get('mode') == 'bot' else 2
+    
+    # Bot mode: only room creator can join
+    if state.get('mode') == 'bot':
+        if username != state['room_creator']:
+            emit("error", {"message": "Only room creator can join vs Computer rooms"})
+            return
+        max_humans = 1
+    else:
+        # PvP mode: allow up to 2 players
+        max_humans = 2
+    
     if len(current_players) >= max_humans and username not in current_players:
         emit("error", {"message": f"Room full ({max_humans} player{'s' if max_humans>1 else ''} max)"})
         return
@@ -854,12 +859,10 @@ def on_pong_start_game(data):
         'score': {'left': 0, 'right': 0}
     }
     
-    # For Vercel compatibility, start game loop without threading
-    # The game will run in the main thread which is fine for serverless
-    try:
-        game_loop(room_id)
-    except Exception as e:
-        print(f"Game loop error: {e}")
+    # Start game loop in a separate thread for proper multiplayer
+    game_thread = threading.Thread(target=game_loop, args=(room_id,))
+    game_thread.daemon = True
+    game_thread.start()
     
     emit('pong_game_started', {
         'game_state': state['game_state']
@@ -1120,10 +1123,5 @@ if __name__ == "__main__":
     # Vercel will use the app object directly
     socketio.run(app, debug=True, port=5000, use_reloader=False, allow_unsafe_werkzeug=True)
 
-# For Vercel production deployment
+# For production deployment
 app.debug = False
-
-# Ensure app is properly configured for Vercel
-if os.environ.get('VERCEL'):
-    # Disable threading for Vercel compatibility
-    app.config['SOCKETIO_ASYNC_MODE'] = 'polling'

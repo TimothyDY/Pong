@@ -78,16 +78,25 @@
         </div>
         <div class="room-actions">
           {% if r['type'] == 'public' %}
-            <a class="btn" href="{{ url_for('game', room_id=r['id']) }}">Join</a>
-            {% if r['created_by'] == session['username'] %}
-              <a class="btn" href="{{ url_for('game', room_id=r['id']) }}?autostart=1">Start</a>
-              <button class="btn secondary btn-room-delete" data-room-id="{{ r['id'] }}">Delete</button>
+            {% if r['mode'] == 'bot' %}
+              <!-- Bot mode: only creator can join -->
+              {% if r['created_by'] == session['username'] %}
+                <a class="btn" href="{{ url_for('game', room_id=r['id']) }}">Join (Your Room)</a>
+                <button class="btn secondary btn-room-delete" data-room-id="{{ r['id'] }}">Delete</button>
+              {% else %}
+                <span class="muted">Bot Room - Creator Only</span>
+              {% endif %}
+            {% else %}
+              <!-- PvP mode: anyone can join -->
+              <a class="btn" href="{{ url_for('game', room_id=r['id']) }}">Join</a>
+              {% if r['created_by'] == session['username'] %}
+                <button class="btn secondary btn-room-delete" data-room-id="{{ r['id'] }}">Delete</button>
+              {% endif %}
             {% endif %}
           {% else %}
             {% if r['created_by'] == session['username'] %}
               <!-- Room creator can join directly -->
               <a class="btn" href="{{ url_for('game', room_id=r['id']) }}">Join (Your Room)</a>
-              <a class="btn" href="{{ url_for('game', room_id=r['id']) }}?autostart=1">Start</a>
               <button class="btn secondary btn-room-delete" data-room-id="{{ r['id'] }}">Delete</button>
             {% else %}
               <!-- Other users need password -->
